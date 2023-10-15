@@ -6,28 +6,28 @@
 using namespace llvm;
 
 namespace {
-
-struct SkeletonPass : public PassInfoMixin<SkeletonPass> {
-    PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM) {
-        for (auto &F : M) {
-            errs() << "I saw a function called " << F.getName() << "!\n";
-        }
+struct LICMPass : public PassInfoMixin<LICMPass> {
+    PreservedAnalyses run (Loop &L, LoopAnalysisManager &AM, LoopStandardAnalysisResults &AR, LPMUpdater &U) {
+        errs() << "I saw a loop!\n";
+        
         return PreservedAnalyses::all();
     };
+
+    static bool isRequired() { return true; }
+};
 };
 
-}
 
 extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo
 llvmGetPassPluginInfo() {
     return {
         .APIVersion = LLVM_PLUGIN_API_VERSION,
         .PluginName = "Skeleton pass",
-        .PluginVersion = "v0.1",
+        .PluginVersion = LLVM_VERSION_STRING,
         .RegisterPassBuilderCallbacks = [](PassBuilder &PB) {
-            PB.registerPipelineStartEPCallback(
-                [](ModulePassManager &MPM, OptimizationLevel Level) {
-                    MPM.addPass(SkeletonPass());
+            PB.registerLateLoopOptimizationsEPCallback(
+                [](llvm::LoopPassManager &LPM, OptimizationLevel Level) {
+                  LPM.addPass(LICMPass());
                 });
         }
     };
