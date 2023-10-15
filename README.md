@@ -1,7 +1,6 @@
-# llvm-pass-skeleton
+# llvm-licm
 
-A completely useless LLVM pass.
-It's for LLVM 17.
+Our implementation of the Loop-invariant code motion pass. 
 
 Build:
 
@@ -13,5 +12,5 @@ Build:
     $ cd ..
 
 Run:
+    $ clang -fpass-plugin=`echo build/licm/LICMPass.*` something.c
 
-    $ clang -fpass-plugin=`echo build/skeleton/SkeletonPass.*` something.c
