@@ -15,6 +15,15 @@ namespace
     {
         PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM, LoopStandardAnalysisResults &AR, LPMUpdater &U)
         {
+            errs() <<"Before :\n";
+            for (auto &B : L.blocks())
+            {
+                for (auto &I : *B)
+                {
+                    errs() << I << " \n ";
+                }
+                errs() << " \n ";
+            }
             DominatorTree &DT = AR.DT;
             for (auto &B : L.blocks())
             {
@@ -55,6 +64,15 @@ namespace
                 }
             }
 
+            errs() <<"After :\n";
+            for (auto &B : L.blocks())
+            {
+                for (auto &I : *B)
+                {
+                    errs() << I << " \n ";
+                }
+                errs() << " \n ";
+            }
             return PreservedAnalyses::none();
         };
         static bool isRequired() { return true; }
