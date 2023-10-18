@@ -3,79 +3,66 @@
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
-#include <queue>
+#include "llvm/IRPrinter/IRPrintingPasses.h"
+#include "llvm/IR/Instruction.h"
+#include <unordered_set>
 
 using namespace llvm;
 namespace
 {
     struct LICMPass : public PassInfoMixin<LICMPass>
     {
+        std::unordered_set<Value *> loopInvariants;
+
+        bool isLIAndSafeToHoist(Loop &L, Instruction &I)
+        {
+            if (!isSafeToSpeculativelyExecute(&I) || I.mayReadOrWriteMemory())
+                return false;
+
+            if (all_of(I.operands(), [&L, this](Value *V)
+                       // do we need the second condition?
+                       { return L.isLoopInvariant(V) || loopInvariants.find(V) != loopInvariants.end(); }))
+            {
+                // errs() << "LOOP INV " << I << "\n";
+                loopInvariants.insert(&I);
+                return true;
+            }
+
+            return false;
+        }
+
         PreservedAnalyses run(Loop &L, LoopAnalysisManager &AM, LoopStandardAnalysisResults &AR, LPMUpdater &U)
         {
-            errs() <<"Before :\n";
-            for (auto &B : L.blocks())
-            {
-                for (auto &I : *B)
-                {
-                    errs() << I << " \n ";
-                }
-                errs() << " \n ";
-            }
-            DominatorTree &DT = AR.DT;
-            for (auto &B : L.blocks())
-            {
-                std::queue<std::pair<Instruction *, BasicBlock *>> toBeHoisted;
-                for (auto &I : *B)
-                {
-                    // TODO: hasLoopInvariantOperands only checks that all reaching defintions of arguments
-                    // are outside of the loop and is too conservative. We also want to cover the second criterion "exactly one definition, and it is already marked as
-                    // loop invariant"
-                    if (!L.hasLoopInvariantOperands(&I))
-                    {
-                        continue;
-                    }
-                    if (!all_of(I.uses(), [&DT, &I](Use &U)
-                                { return DT.dominates(&I, U); }))
-                        continue;
-                    SmallVector<BasicBlock *> exitBlocks;
-                    L.getExitBlocks(exitBlocks);
-                    if (!all_of(exitBlocks, [&DT, &I](BasicBlock *B)
-                                { return DT.dominates(&I, B); }))
-                        continue;
 
-                    if (isSafeToSpeculativelyExecute(&I))
+            bool changing;
+            do
+            {
+                changing = false;
+                for (auto &B : L.blocks())
+                {
+                    for (auto &I : *B)
                     {
+                        if (!isLIAndSafeToHoist(L, I))
+                        {
+                            continue;
+                        }
+
                         BasicBlock *preheader = L.getLoopPreheader();
                         auto *PI = &I;
-                        toBeHoisted.push({PI, preheader});
+                        Instruction *term = preheader->getTerminator();
+                        I.moveBefore(term);
+                        I.dropUnknownNonDebugMetadata();
+                        changing = true;
 
-                        errs() << "Hoisted instruction: " << *PI << "\n";
+                        // errs() << "Hoisted instruction: " << *PI << "\n";
+                        break;
                     }
                 }
-                while (!toBeHoisted.empty())
-                {
-                    const auto &[I, preheader] = toBeHoisted.front();
-                    toBeHoisted.pop();
-                    I->removeFromParent();
-                    I->insertInto(preheader, preheader->end());
-                }
-            }
+            } while (changing);
 
-            errs() <<"After :\n";
-            for (auto &B : L.blocks())
-            {
-                for (auto &I : *B)
-                {
-                    errs() << I << " \n ";
-                }
-                errs() << " \n ";
-            }
             return PreservedAnalyses::none();
         };
-        static bool isRequired() { return true; }
     };
 };
 
@@ -88,14 +75,18 @@ llvmGetPassPluginInfo()
         .PluginVersion = LLVM_VERSION_STRING,
         .RegisterPassBuilderCallbacks = [](PassBuilder &PB)
         {
-            PB.registerScalarOptimizerLateEPCallback(
-                [](FunctionPassManager &FPM, OptimizationLevel Level) {
-                    FPM.addPass(PromotePass());
-                    FPM.addPass(createFunctionToLoopPassAdaptor(LICMPass()));
+            PB.registerPipelineStartEPCallback(
+                [](ModulePassManager &MPM, OptimizationLevel Level)
+                {
+                    MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+                    // MPM.addPass(createModuleToFunctionPassAdaptor(LoopSimplifyPass()));
+                    // MPM.addPass(PrintModulePass());
+                    MPM.addPass(createModuleToFunctionPassAdaptor(createFunctionToLoopPassAdaptor(LICMPass())));
+                    MPM.addPass(PrintModulePass());
                 });
 
-            // use the following code if you want to run the passes with opt    
- 
+            // use the following code if you want to run the passes with opt
+
             // PB.registerPipelineParsingCallback(
             //     [](StringRef Name, LoopPassManager &LPM,
             //        ArrayRef<PassBuilder::PipelineElement>)
@@ -105,7 +96,7 @@ llvmGetPassPluginInfo()
             //             return true;
             //         }
             //         return false;
-                    
+
             //     });
         }};
 }
